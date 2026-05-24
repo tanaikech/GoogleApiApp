@@ -8,7 +8,7 @@
 
 # Overview
 
-This is a Google Apps Script library for supporting to use Google APIs with Google Apps Script. It features automatic discovery URL handling, pagination, built-in caching, and comprehensive logging.
+This is a Google Apps Script library for supporting the use of Google APIs with Google Apps Script. It features automatic discovery URL handling, pagination, built-in V8-compatible caching, and comprehensive logging.
 
 ![](images/fig1.png)
 
@@ -20,14 +20,15 @@ There are numerous powerful Google APIs available today. Google Apps Script stre
 
 However, utilizing APIs beyond advanced Google services can be challenging for some users. Developing a simpler method for using various Google APIs would significantly increase their accessibility and empower a broader range of users to create diverse applications.
 
-To address this challenge, I created a Google Apps Script library called GoogleApiApp that simplifies the process of using various Google APIs. **Version 2.0.0** introduces a robust ES6 Class architecture allowing you to use this either as a Library or by directly copying the source code into your project, offering vast improvements in speed via caching and superior error tracing.
+To address this challenge, I created a Google Apps Script library called GoogleApiApp that simplifies the process of using various Google APIs. **Version 2.1.1** introduces a robust ES6 Class architecture with intelligent parameter parsing and static caching, allowing you to use this either as a Library or by directly copying the source code into your project. It offers vast improvements in execution speed and superior error tracing.
 
 This library offers the following functionalities:
 
 - **Simplified API Calls:** Interact with various Google APIs directly through Apps Script with an API name, method, and parameters.
+- **Smart Parameter Injection:** Distinct handling of endpoint paths and query strings. Path parameters support composite resource names (e.g., `properties/12345`) without aggressive URL encoding, while query parameters are strictly URL-encoded.
 - **Automatic Pagination:** For APIs that utilize pagination through a pageToken, this library automatically retrieves all available items.
 - **Real-Time Logging & Debugging:** Pass a callback to trace executions, endpoints, payload injections, and detailed errors.
-- **Backward Compatibility:** Legacy users don't need to change a single line of code after updating to v2.0.0.
+- **Backward Compatibility:** Legacy users don't need to change a single line of code after updating to the latest version.
 
 # Library's project key
 
@@ -111,16 +112,16 @@ const res = app
 
 Set parameters for using the Google API you want to use.
 
-- `path`: Used in the endpoint (e.g. `{ fileId: "###" }`).
-- `query`: Query string parameters (e.g. `{ fields: "id,name" }`).
+- `path`: Used in the endpoint (e.g., `{ fileId: "###" }` or `{+name}`). **These values are NOT URL-encoded**, allowing you to seamlessly pass composite Google Cloud resource names containing slashes (e.g., `properties/12345`).
+- `query`: Query string parameters appended to the URL (e.g., `{ fields: "id,name" }`). **These values are strictly URL-encoded.**
 - `requestBody`: JSON body payloads.
-- `usePageToken`: `true` automatically retrieves all paginated items.
+- `usePageToken`: `true` automatically retrieves all paginated items across multiple requests.
 
 <a name="request"></a>
 
 ## request (with optional logging)
 
-Request Google API. You can now pass a callback function to retrieve real-time traces.
+Request Google API. You can pass a callback function to retrieve real-time traces.
 
 ### Sample 1: Standard Execution with Logs
 
@@ -154,6 +155,28 @@ const res = app.setAPIInf(apiInf).setAPIParams(apiParams).request();
 console.log(`Total retrieved items: ${res.length}`);
 ```
 
+### Sample 3: Combined Path and Query Parameters
+
+Demonstrates the independent handling of unencoded path parameters and strictly encoded query parameters.
+
+```javascript
+const app = new GAApp();
+const apiInf = { api: "drive", version: "v3", methodName: "files.get" };
+
+// 'fileId' replaces `{fileId}` in the path WITHOUT encoding.
+// 'fields' is strictly URL-encoded as a query parameter (e.g., ?fields=id%2Cname).
+const apiParams = {
+  path: { fileId: "YOUR_FILE_ID" },
+  query: { fields: "id,name,mimeType" },
+};
+
+const res = app
+  .setAPIInf(apiInf)
+  .setAPIParams(apiParams)
+  .request((log) => console.log(log));
+console.log(JSON.parse(res.getContentText()));
+```
+
 # Note
 
 - For unsupported Google APIs (ones not discoverable via Google API Discovery Service like early-stage Gemini APIs), they cannot be used yet.
@@ -176,6 +199,10 @@ console.log(`Total retrieved items: ${res.length}`);
 
 # Update History
 
+- v2.1.1 (May 24, 2026)
+  1. Restructured caching implementation to use prototype-attached static properties, resolving syntax parsing errors in the GAS V8 engine while retaining cross-instance performance benefits.
+  2. Implemented strict separation of URL encoding logic: Path parameters mapping to `{resource}` or `{+resource}` are no longer URL-encoded to support Google APIs composite names (e.g., `properties/123`), while Query parameters continue to be safely URL-encoded.
+  3. Fortified RegExp replacement logic to eliminate substring collision risks during endpoint construction.
 - v2.0.0 (May 19, 2026)
   1. Complete refactor adopting an ES6 Class structure (`GAApp`).
   2. Implemented Discovery Document caching mechanisms reducing sequential execution times.

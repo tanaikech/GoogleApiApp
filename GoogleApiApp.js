@@ -5,7 +5,7 @@
  * @const {string}
  * @readonly
  */
-var appName = "GoogleApiApp";
+const appName = "GoogleApiApp";
 
 /**
  * Library version
@@ -13,30 +13,32 @@ var appName = "GoogleApiApp";
  * @const {string}
  * @readonly
  */
-var version = "v2.0.0";
+const version = "v2.1.1";
 
 /**
  * @class GoogleApiApp
- * @version 2.0.0
+ * @version 2.1.1
  * @description
  * A robust, highly efficient ES6 Class to simplify the usage of various Google APIs with Google Apps Script.
  * This class automatically handles Google API Discovery, endpoint construction, authentication, caching,
  * pagination, and provides real-time logging alongside user-friendly error handling.
  *
+ * ### Key Updates:
+ * - Path parameters mapping to `{resource}` or `{+resource}` are no longer URL-encoded, seamlessly supporting composite resource names (e.g., `properties/12345`).
+ * - Query parameters continue to be strictly URL-encoded.
+ * - Discovery Document caching is implemented as a static property attached to the class prototype, ensuring GAS V8 compatibility while drastically improving performance across instantiations.
+ * - Fortified Regex replacement logic to eliminate substring collision risks during endpoint construction.
+ *
  * ### How to Use directly (Without Library Wrapper)
  * 1. Initialize the class: `const app = new GAApp();`
- * 2. Set the API configuration: `app.setAPIInf({ api: "drive", version: "v3", methodName: "files.list" });`
- * 3. Set the API parameters: `app.setAPIParams({ query: { pageSize: 10 }, usePageToken: true });`
+ * 2. Set the API configuration: `app.setAPIInf({ api: "analyticsdata", version: "v1beta", methodName: "properties.runReport" });`
+ * 3. Set the API parameters: `app.setAPIParams({ path: { property: "properties/12345" }, query: { fields: "kind" } });`
  * 4. Request the API: `const response = app.request(log => console.log(log));`
- *
- * Note: Ensure that the corresponding API is enabled via "Advanced Google services" (the "Services" '+' button
- * in the left sidebar of the GAS editor) or the Google Cloud API console. Also, ensure the required OAuth
- * scopes are added to your `appsscript.json` manifest file.
  */
-var GAApp = class GoogleApiApp {
+const GAApp = class GoogleApiApp {
   /**
    * ### Description
-   * Constructor for GoogleApiApp. Initializes internal properties and caching mechanisms.
+   * Constructor for GoogleApiApp. Initializes internal properties.
    */
   constructor() {
     this.apiInf = {};
@@ -48,16 +50,13 @@ var GAApp = class GoogleApiApp {
     this.messages = [];
     this.apiObj = null;
     this.logs = [];
-
-    // Internal cache to prevent redundant fetching of massive Discovery Documents
-    this.discoveryCache = {};
   }
 
   /**
    * ### Description
    * Set information of the Google API you want to use.
    *
-   * @param {Object} object Object for using a Google API. e.g. {api: "drive", version: "v3", methodName: "files.list"}
+   * @param {Object} object Configuration object. e.g. {api: "drive", version: "v3", methodName: "files.list"}
    * @return {GoogleApiApp} This instance for method chaining.
    */
   setAPIInf(object = {}) {
@@ -67,13 +66,13 @@ var GAApp = class GoogleApiApp {
 
   /**
    * ### Description
-   * Set parameters for using the Google API you want to use.
-   * `path`: Object (e.g. { fileId: "xxx" }). This value is used in the endpoint path.
-   * `query`: Object (e.g. { fields: "id,name" }). This value is used in the query parameter of the endpoint.
-   * `requestBody`: Object (e.g. { name: "sample title" }). This value is used as the JSON request body.
-   * `usePageToken`: Boolean. When true, the response items are retrieved automatically across all pages. Default is false.
+   * Set parameters for using the Google API.
+   * `path`: Object (e.g. { property: "properties/123" }). Directly injected into the endpoint path WITHOUT URL encoding to support composite resource names.
+   * `query`: Object (e.g. { fields: "id,name" }). Safely URL-encoded and appended as query strings.
+   * `requestBody`: Object (e.g. { name: "sample title" }). Sent as the JSON request body.
+   * `usePageToken`: Boolean. When true, retrieves all items automatically across pages.
    *
-   * @param {Object} object Object including parameters for using a Google API.
+   * @param {Object} object Object containing API arguments.
    * @return {GoogleApiApp} This instance for method chaining.
    */
   setAPIParams(object = {}) {
@@ -83,8 +82,7 @@ var GAApp = class GoogleApiApp {
 
   /**
    * ### Description
-   * Set a custom access token. When you are required to use a specific access token (e.g., from a service account),
-   * please use this method. If this method is not used, the script will automatically fallback to `ScriptApp.getOAuthToken()`.
+   * Set a custom access token. Overrides `ScriptApp.getOAuthToken()`.
    *
    * @param {String} accessToken Your custom OAuth2 access token.
    * @return {GoogleApiApp} This instance for method chaining.
@@ -110,8 +108,8 @@ var GAApp = class GoogleApiApp {
    * ### Description
    * Execute the requested Google API call.
    *
-   * @param {Function} [callback=null] Optional callback function to receive real-time execution logs (e.g., `msg => console.log(msg)`).
-   * @returns {UrlFetchApp.HTTPResponse|String[]} Returns HTTPResponse for normal requests. When `usePageToken` is true, returns an aggregated Array of items.
+   * @param {Function} [callback=null] Optional callback function to receive real-time execution logs.
+   * @returns {UrlFetchApp.HTTPResponse|String[]} Returns HTTPResponse for normal requests. Returns an Array of items if `usePageToken` is true.
    */
   request(callback = null) {
     this.log_("Starting API request process...", callback);
@@ -129,14 +127,13 @@ var GAApp = class GoogleApiApp {
       return this.getList_(callback);
     }
 
-    this.log_("Executing normal singular API request.", callback);
+    this.log_("Executing standard singular API request.", callback);
     return this.normalRequest_(callback);
   }
 
   /**
    * ### Description
-   * Retrieve the internal execution logs generated during the API requests.
-   * Useful for debugging or storing run histories after execution completes.
+   * Retrieve internal execution logs generated during the API requests.
    *
    * @returns {String[]} Array of timestamped log strings.
    */
@@ -161,7 +158,7 @@ var GAApp = class GoogleApiApp {
         callback(logEntry);
       } catch (e) {
         console.error(
-          "Error occurred inside the provided logging callback function:",
+          "Error inside the provided logging callback function:",
           e,
         );
       }
@@ -170,9 +167,9 @@ var GAApp = class GoogleApiApp {
 
   /**
    * ### Description
-   * Verify the structural integrity of the inputted object properties.
+   * Verify structural integrity of the input parameters.
    *
-   * @param {Boolean} isRequest Flag indicating if this is an actual request or just information retrieval.
+   * @param {Boolean} isRequest Flag indicating if this is an actual request.
    * @private
    */
   errorCheck_(isRequest) {
@@ -182,15 +179,13 @@ var GAApp = class GoogleApiApp {
       !requiredKeys.every((k) => this.apiInf.hasOwnProperty(k))
     ) {
       throw new Error(
-        "Invalid apiInf object. Please ensure 'api', 'version', and 'methodName' are properly provided via setAPIInf().",
+        "Invalid apiInf object. Ensure 'api', 'version', and 'methodName' are properly provided via setAPIInf().",
       );
     }
+
     if (isRequest) {
-      if (!this.apiParams) {
-        this.apiParams = { query: {} };
-      } else if (!this.apiParams.query) {
-        this.apiParams.query = {};
-      }
+      this.apiParams = this.apiParams || {};
+      this.apiParams.query = this.apiParams.query || {};
       if (!this.apiParams.query.hasOwnProperty("key")) {
         this.token = this.accessToken || ScriptApp.getOAuthToken();
       }
@@ -199,8 +194,7 @@ var GAApp = class GoogleApiApp {
 
   /**
    * ### Description
-   * Construct user-friendly error messages based on common Google API HTTP response codes and payloads.
-   * Specifically handles 403 (Forbidden) and 401 (Unauthorized) to guide users towards enabling APIs or adding scopes.
+   * Construct actionable error messages based on API HTTP response codes.
    *
    * @param {Number} code HTTP Status Code.
    * @param {String} responseText Raw JSON string response from the API.
@@ -220,34 +214,21 @@ var GAApp = class GoogleApiApp {
 
     if (code === 403 || code === 401) {
       const lowerErrMsg = errMsg.toLowerCase();
-
       if (
         lowerErrMsg.includes("insufficient authentication scopes") ||
         lowerErrMsg.includes("insufficient permission")
       ) {
         const requiredScopes = this.apiObj?.scopes
           ? this.apiObj.scopes.join("\n- ")
-          : "Unknown (Please check official documentation)";
-        userFriendlyHelp =
-          `\n\n[ACTION REQUIRED: MISSING SCOPES]\n` +
-          `Your script does not have the necessary permissions to execute this method.\n` +
-          `Please manually add one or more of the following scopes to your 'appsscript.json' manifest file:\n- ${requiredScopes}`;
+          : "Unknown (Check official documentation)";
+        userFriendlyHelp = `\n\n[ACTION REQUIRED: MISSING SCOPES]\nManually add these scopes to your 'appsscript.json' manifest:\n- ${requiredScopes}`;
       } else if (
         lowerErrMsg.includes("has not been used in project") ||
-        lowerErrMsg.includes("is disabled") ||
-        lowerErrMsg.includes("enable it by visiting")
+        lowerErrMsg.includes("is disabled")
       ) {
-        userFriendlyHelp =
-          `\n\n[ACTION REQUIRED: API DISABLED]\n` +
-          `The requested API (${this.apiInf.api.toUpperCase()} API) is currently disabled.\n` +
-          `EASIEST FIX: Go to the Apps Script editor, look at the left sidebar, click the '+' icon next to "Services" (Advanced Google Services), and add "${this.apiInf.api}".\n` +
-          `This action automatically enables the API in your Google Cloud project. Alternatively, you can enable it manually in the GCP API Console.`;
+        userFriendlyHelp = `\n\n[ACTION REQUIRED: API DISABLED]\nThe requested API (${this.apiInf.api.toUpperCase()}) is disabled.\nEnable it via "Advanced Google Services" (the '+' icon in the editor sidebar).`;
       } else {
-        userFriendlyHelp =
-          `\n\n[ACTION REQUIRED: PERMISSION DENIED]\n` +
-          `Please verify two things:\n` +
-          `1. The API is enabled in "Services" on the left sidebar of the Apps Script editor.\n` +
-          `2. Your OAuth token or Service Account has proper access rights to the requested resource.`;
+        userFriendlyHelp = `\n\n[ACTION REQUIRED: PERMISSION DENIED]\nVerify the API is enabled in Services and your OAuth token possesses the correct access rights.`;
       }
     }
 
@@ -259,7 +240,7 @@ var GAApp = class GoogleApiApp {
    * Fetch the Discovery Rest URL for the specified Google API.
    *
    * @param {Function} callback Callback for real-time logging.
-   * @returns {Object} Discovery rest URL and warning messages of the API.
+   * @returns {Object} Discovery rest URL and API warning messages.
    * @private
    */
   getAPI_(callback) {
@@ -276,7 +257,7 @@ var GAApp = class GoogleApiApp {
     const { items } = JSON.parse(res.getContentText());
     if (!items || items.length === 0) {
       throw new Error(
-        "Invalid values returned from Discovery API. The requested API might not exist or is unsupported.",
+        "Invalid response from Discovery API. Requested API may not exist.",
       );
     }
 
@@ -285,24 +266,25 @@ var GAApp = class GoogleApiApp {
     );
     if (!r) {
       throw new Error(
-        `Inputted API (${api} ${version}) was not found. Please verify the API name and version.`,
+        `API (${api} ${version}) not found. Verify the API name and version.`,
       );
     }
 
     this.log_(`Discovery Document located: ${r.discoveryRestUrl}`, callback);
-    const messages = [
-      `Discovery rest URL is ${r.discoveryRestUrl}`,
-      `[IMPORTANT] Please enable "${r.title} ${r.version}" via "Advanced Google services" (Services '+' icon in the editor sidebar) or the GCP API console.`,
-      `Official documentation link: ${r.documentationLink}`,
-    ];
-
-    return { url: r.discoveryRestUrl, messages };
+    return {
+      url: r.discoveryRestUrl,
+      messages: [
+        `Discovery rest URL is ${r.discoveryRestUrl}`,
+        `[IMPORTANT] Enable "${r.title} ${r.version}" via "Advanced Google services".`,
+        `Official documentation link: ${r.documentationLink}`,
+      ],
+    };
   }
 
   /**
    * ### Description
-   * Extract the target method details from the API specification and construct the final endpoint.
-   * Utilizes internal caching to drastically improve performance on sequential calls.
+   * Extract target method details and construct the final endpoint.
+   * Path parameters are injected purely without URL encoding to support Google APIs composite names.
    *
    * @param {Function} callback Callback for logging.
    * @private
@@ -312,16 +294,17 @@ var GAApp = class GoogleApiApp {
     const cacheKey = `${api}_${version}`;
     let url, messages, baseUrl, resources;
 
-    if (this.discoveryCache[cacheKey]) {
+    // Utilizing static class cache to preserve data across multiple instances
+    if (GAApp.discoveryCache[cacheKey]) {
       this.log_(
-        `Cache HIT: Using previously fetched Discovery Document for ${cacheKey}.`,
+        `Static Cache HIT: Using fetched Discovery Document for ${cacheKey}.`,
         callback,
       );
-      ({ url, messages, baseUrl, resources } = this.discoveryCache[cacheKey]);
+      ({ url, messages, baseUrl, resources } = GAApp.discoveryCache[cacheKey]);
       this.messages = messages;
     } else {
       this.log_(
-        `Cache MISS: Fetching specifications for ${cacheKey}.`,
+        `Static Cache MISS: Fetching specifications for ${cacheKey}.`,
         callback,
       );
       const discoveryData = this.getAPI_(callback);
@@ -340,7 +323,7 @@ var GAApp = class GoogleApiApp {
       baseUrl = parsed.baseUrl;
       resources = parsed.resources;
 
-      this.discoveryCache[cacheKey] = {
+      GAApp.discoveryCache[cacheKey] = {
         url,
         messages: this.messages,
         baseUrl,
@@ -353,11 +336,10 @@ var GAApp = class GoogleApiApp {
     let r = resources[resource];
     let out = null;
 
-    if (!r) {
+    if (!r)
       throw new Error(
         `Resource '${resource}' not found in API specifications.`,
       );
-    }
 
     for (let i = 0; i < ar.length; i++) {
       if (r.methods && r.methods[ar[i]]) {
@@ -372,38 +354,38 @@ var GAApp = class GoogleApiApp {
 
     if (out === null) {
       throw new Error(
-        `Method '${methodName}' is invalid. Please set a valid methodName (e.g., files.list, users.settings.sendAs.smimeInfo.get).`,
+        `Method '${methodName}' is invalid. (e.g., files.list, properties.runReport)`,
       );
     }
 
     if (out.scopes) {
       this.messages.push(
-        `Required Scopes: Please add one or several of the following scopes to appsscript.json: \n- ${out.scopes.join("\n- ")}`,
+        `Required Scopes: Add to appsscript.json: \n- ${out.scopes.join("\n- ")}`,
         out.description ? `Description: ${out.description.trim()}` : "",
       );
     }
 
     this.apiUrl = `${baseUrl}${out.path}`;
+
+    // Inject Path Parameters directly without URL encoding
     if (this.apiParams?.path) {
       Object.entries(this.apiParams.path).forEach(([k, v]) => {
-        const reg = new RegExp(`{.*?${k}.*?}`);
-        this.apiUrl = this.apiUrl.replace(reg, encodeURIComponent(v));
+        // Strict RegExp matching `{param}` or `{+param}` to prevent aggressive substring collisions
+        const reg = new RegExp(`{\\+?${k}}`, "g");
+        this.apiUrl = this.apiUrl.replace(reg, v);
       });
     }
 
-    this.log_(
-      `Successfully constructed Base Endpoint URL: ${this.apiUrl}`,
-      callback,
-    );
+    this.log_(`Constructed Base Endpoint URL: ${this.apiUrl}`, callback);
     this.apiObj = out;
   }
 
   /**
    * ### Description
-   * Execute a singular HTTP request to the Google API.
+   * Execute a singular HTTP request.
    *
    * @param {Function} callback Callback for logging.
-   * @returns {UrlFetchApp.HTTPResponse} Raw response from API.
+   * @returns {UrlFetchApp.HTTPResponse}
    * @private
    */
   normalRequest_(callback) {
@@ -418,6 +400,7 @@ var GAApp = class GoogleApiApp {
       req.contentType = "application/json";
       this.log_("Attached requestBody (JSON payload).", callback);
     }
+
     if (this.token) {
       req.headers = { authorization: `Bearer ${this.token}` };
     }
@@ -443,34 +426,29 @@ var GAApp = class GoogleApiApp {
 
   /**
    * ### Description
-   * Execute sequential HTTP requests to the Google API, automatically aggregating items using pageToken.
+   * Execute sequential HTTP requests, aggregating items automatically via pageToken.
    *
    * @param {Function} callback Callback for logging.
-   * @returns {String[]} Consolidated array of response items.
+   * @returns {String[]} Consolidated array of items.
    * @private
    */
   getList_(callback) {
     if (
-      this.apiParams.query &&
-      this.apiParams.query.fields &&
+      this.apiParams.query?.fields &&
       !this.apiParams.query.fields.includes("nextPageToken")
     ) {
       this.apiParams.query.fields += ",nextPageToken";
       this.log_(
-        "Appended 'nextPageToken' to query.fields to ensure pagination functionality works.",
+        "Appended 'nextPageToken' to query.fields to ensure pagination functionality.",
         callback,
       );
     }
 
     const p = ["maxResults", "pageSize"].find((e) => this.apiObj.parameters[e]);
-    if (
-      p &&
-      this.apiObj.parameters[p]?.maximum &&
-      this.apiObj.parameters[p]?.maximum > 0
-    ) {
+    if (p && this.apiObj.parameters[p]?.maximum > 0) {
       this.apiParams.query[p] = this.apiObj.parameters[p].maximum;
       this.log_(
-        `Maximized pagination efficiency by forcing query '${p}' = ${this.apiObj.parameters[p].maximum}`,
+        `Forced query '${p}' = ${this.apiObj.parameters[p].maximum} to maximize pagination efficiency.`,
         callback,
       );
     }
@@ -487,32 +465,21 @@ var GAApp = class GoogleApiApp {
       const url = this.addQuery_(this.apiUrl, this.apiParams.query);
       const req = { muteHttpExceptions: true, method: this.apiObj.httpMethod };
 
-      if (this.token) {
-        req.headers = { authorization: `Bearer ${this.token}` };
-      }
+      if (this.token) req.headers = { authorization: `Bearer ${this.token}` };
 
       const res = this.fetch_({ url, ...req }, callback);
       const code = res.getResponseCode();
 
       if (code < 200 || code >= 300) {
-        const userFriendlyErrorMsg = this.handleApiError_(
-          code,
-          res.getContentText(),
-        );
-        this.log_(
-          `API Execution Failed on Page ${numberOfPages}. Parsing error details...`,
-          callback,
-        );
-        throw new Error(userFriendlyErrorMsg);
+        const errorMsg = this.handleApiError_(code, res.getContentText());
+        this.log_(`Execution Failed on Page ${numberOfPages}.`, callback);
+        throw new Error(errorMsg);
       }
 
       const o = JSON.parse(res.getContentText());
-      // Identify the primary array holding items
       const ar = Object.values(o).find((e) => Array.isArray(e));
 
-      if (ar && ar.length > 0) {
-        items.push(...ar);
-      }
+      if (ar && ar.length > 0) items.push(...ar);
       this.log_(
         `Successfully fetched items. Cumulative array size: ${items.length}`,
         callback,
@@ -530,7 +497,7 @@ var GAApp = class GoogleApiApp {
     } while (pageToken);
 
     this.log_(
-      `Complete. Fetched ${numberOfPages} page(s) totaling ${items.length} aggregated items.`,
+      `Complete. Fetched ${numberOfPages} page(s) totaling ${items.length} items.`,
       callback,
     );
     return items;
@@ -539,10 +506,11 @@ var GAApp = class GoogleApiApp {
   /**
    * ### Description
    * Safely appends query parameters to the endpoint URL.
+   * Query parameters are strictly URL-encoded.
    *
    * @param {String} url Endpoint URL string.
    * @param {Object} query Query parameters object.
-   * @returns {String} Endpoint string containing properly encoded query parameters.
+   * @returns {String} URL containing encoded query strings.
    * @private
    */
   addQuery_(url, query) {
@@ -559,9 +527,9 @@ var GAApp = class GoogleApiApp {
 
   /**
    * ### Description
-   * Secure wrapper for UrlFetchApp.fetch. Extracted for real-time logging and mockability.
+   * Secure wrapper for UrlFetchApp.fetch.
    *
-   * @param {Object} obj Request configuration object including url.
+   * @param {Object} obj Request configuration object.
    * @param {Function} callback Callback for logging.
    * @returns {UrlFetchApp.HTTPResponse}
    * @private
@@ -574,23 +542,20 @@ var GAApp = class GoogleApiApp {
   }
 };
 
+// V8 Compatible Static Class Property Assignment
+GAApp.discoveryCache = {};
+
 // -------------------------------------------------------------------------
 // Global Wrapper Functions (For Backward Compatibility in GAS Library Mode)
 // -------------------------------------------------------------------------
 
-/**
- * Internal global instance to preserve discoveryCache and states across chaining
- * when used as a library.
- * @private
- */
 const globalAppInstance_ = new GAApp();
 
 /**
  * ### Description
  * Set information of Google API you want to use.
- * (Maintains strictly backward-compatible method chaining via `this`)
  *
- * @param {Object} object Object for using a Google API.
+ * @param {Object} object Configuration object.
  * @return {Object} Returns global `this` for chaining.
  */
 function setAPIInf(object = {}) {
@@ -600,10 +565,9 @@ function setAPIInf(object = {}) {
 
 /**
  * ### Description
- * Set parameters for using Google API you want to use.
- * (Maintains strictly backward-compatible method chaining via `this`)
+ * Set parameters for using Google API.
  *
- * @param {Object} object Object including parameters for using a Google API.
+ * @param {Object} object Object including parameters.
  * @return {Object} Returns global `this` for chaining.
  */
 function setAPIParams(object = {}) {
@@ -614,7 +578,6 @@ function setAPIParams(object = {}) {
 /**
  * ### Description
  * Set access token.
- * (Maintains strictly backward-compatible method chaining via `this`)
  *
  * @param {String} accessToken
  * @return {Object} Returns global `this` for chaining.
@@ -641,8 +604,8 @@ function getAPI() {
  * ### Description
  * Request Google API.
  *
- * @param {Function} [callback=null] Optional callback function to receive real-time execution logs.
- * @returns {UrlFetchApp.HTTPResponse|String[]} Response from API. When pageToken is used, String[] is returned.
+ * @param {Function} [callback=null] Optional callback function for logs.
+ * @returns {UrlFetchApp.HTTPResponse|String[]}
  */
 function request(callback = null) {
   globalAppInstance_.setAPIInf(this.apiInf || {});
