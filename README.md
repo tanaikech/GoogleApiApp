@@ -20,12 +20,12 @@ There are numerous powerful Google APIs available today. Google Apps Script stre
 
 However, utilizing APIs beyond advanced Google services can be challenging for some users. Developing a simpler method for using various Google APIs would significantly increase their accessibility and empower a broader range of users to create diverse applications.
 
-To address this challenge, I created a Google Apps Script library called GoogleApiApp that simplifies the process of using various Google APIs. **Version 2.1.1** introduces a robust ES6 Class architecture with intelligent parameter parsing and static caching, allowing you to use this either as a Library or by directly copying the source code into your project. It offers vast improvements in execution speed and superior error tracing.
+To address this challenge, I created a Google Apps Script library called GoogleApiApp that simplifies the process of using various Google APIs. **Version 2.2.0** introduces a robust ES6 Class architecture with intelligent parameter parsing and static caching, allowing you to use this either as a Library or by directly copying the source code into your project. It offers vast improvements in execution speed and superior error tracing.
 
 This library offers the following functionalities:
 
 - **Simplified API Calls:** Interact with various Google APIs directly through Apps Script with an API name, method, and parameters.
-- **Smart Parameter Injection:** Distinct handling of endpoint paths and query strings. Path parameters support composite resource names (e.g., `properties/12345`) without aggressive URL encoding, while query parameters are strictly URL-encoded.
+- **RFC 6570 Compliant Parameter Injection:** Strictly compliant URL encoding for path parameters. It distinguishes between standard expansions (`{param}`) and reserved expansions (`{+param}`), ensuring that multi-byte characters and composite resource names are handled safely and accurately.
 - **Automatic Pagination:** For APIs that utilize pagination through a pageToken, this library automatically retrieves all available items.
 - **Real-Time Logging & Debugging:** Pass a callback to trace executions, endpoints, payload injections, and detailed errors.
 - **Backward Compatibility:** Legacy users don't need to change a single line of code after updating to the latest version.
@@ -112,7 +112,7 @@ const res = app
 
 Set parameters for using the Google API you want to use.
 
-- `path`: Used in the endpoint (e.g., `{ fileId: "###" }` or `{+name}`). **These values are NOT URL-encoded**, allowing you to seamlessly pass composite Google Cloud resource names containing slashes (e.g., `properties/12345`).
+- `path`: Used in the endpoint (e.g., `{ fileId: "###" }` or `{+name}`). **These values are strictly encoded per RFC 6570 specifications**, ensuring multi-byte characters (e.g., Japanese text) and composite Google Cloud resource names are handled safely. Distinguishes between standard expansions (`{param}` uses `encodeURIComponent`) and reserved expansions (`{+param}` uses `encodeURI`).
 - `query`: Query string parameters appended to the URL (e.g., `{ fields: "id,name" }`). **These values are strictly URL-encoded.**
 - `requestBody`: JSON body payloads.
 - `usePageToken`: `true` automatically retrieves all paginated items across multiple requests.
@@ -157,13 +157,13 @@ console.log(`Total retrieved items: ${res.length}`);
 
 ### Sample 3: Combined Path and Query Parameters
 
-Demonstrates the independent handling of unencoded path parameters and strictly encoded query parameters.
+Demonstrates the independent handling of RFC 6570 encoded path parameters and strictly encoded query parameters.
 
 ```javascript
 const app = new GAApp();
 const apiInf = { api: "drive", version: "v3", methodName: "files.get" };
 
-// 'fileId' replaces `{fileId}` in the path WITHOUT encoding.
+// 'fileId' replaces `{fileId}` in the path with RFC 6570 encoding.
 // 'fields' is strictly URL-encoded as a query parameter (e.g., ?fields=id%2Cname).
 const apiParams = {
   path: { fileId: "YOUR_FILE_ID" },
@@ -199,6 +199,9 @@ console.log(JSON.parse(res.getContentText()));
 
 # Update History
 
+- v2.2.0 (May 25, 2026)
+  1. Implemented strict RFC 6570 compliant URL encoding for path parameters. Distinguishes between standard expansions (`{param}`, uses encodeURIComponent) and reserved expansions (`{+param}`, uses encodeURI).
+  2. Fixed routing issues when passing multi-byte text (e.g., Japanese sheet names) into path parameters.
 - v2.1.1 (May 24, 2026)
   1. Restructured caching implementation to use prototype-attached static properties, resolving syntax parsing errors in the GAS V8 engine while retaining cross-instance performance benefits.
   2. Implemented strict separation of URL encoding logic: Path parameters mapping to `{resource}` or `{+resource}` are no longer URL-encoded to support Google APIs composite names (e.g., `properties/123`), while Query parameters continue to be safely URL-encoded.

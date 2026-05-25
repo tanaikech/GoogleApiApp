@@ -13,21 +13,20 @@ const appName = "GoogleApiApp";
  * @const {string}
  * @readonly
  */
-const version = "v2.1.1";
+const version = "v2.2.0";
 
 /**
  * @class GoogleApiApp
- * @version 2.1.1
+ * @version 2.2.0
  * @description
  * A robust, highly efficient ES6 Class to simplify the usage of various Google APIs with Google Apps Script.
  * This class automatically handles Google API Discovery, endpoint construction, authentication, caching,
  * pagination, and provides real-time logging alongside user-friendly error handling.
  *
- * ### Key Updates:
- * - Path parameters mapping to `{resource}` or `{+resource}` are no longer URL-encoded, seamlessly supporting composite resource names (e.g., `properties/12345`).
- * - Query parameters continue to be strictly URL-encoded.
- * - Discovery Document caching is implemented as a static property attached to the class prototype, ensuring GAS V8 compatibility while drastically improving performance across instantiations.
- * - Fortified Regex replacement logic to eliminate substring collision risks during endpoint construction.
+ * ### Key Updates in v2.2.0:
+ * - Implemented strict RFC 6570 compliant URL encoding for path parameters. Distinguishes between standard
+ *   expansions (`{param}`, uses encodeURIComponent) and reserved expansions (`{+param}`, uses encodeURI).
+ * - Eliminates routing vulnerabilities when passing multi-byte text (e.g., Japanese sheet names) into path parameters.
  *
  * ### How to Use directly (Without Library Wrapper)
  * 1. Initialize the class: `const app = new GAApp();`
@@ -67,7 +66,7 @@ const GAApp = class GoogleApiApp {
   /**
    * ### Description
    * Set parameters for using the Google API.
-   * `path`: Object (e.g. { property: "properties/123" }). Directly injected into the endpoint path WITHOUT URL encoding to support composite resource names.
+   * `path`: Object (e.g. { property: "properties/123" }). Strictly encoded per RFC 6570 specifications.
    * `query`: Object (e.g. { fields: "id,name" }). Safely URL-encoded and appended as query strings.
    * `requestBody`: Object (e.g. { name: "sample title" }). Sent as the JSON request body.
    * `usePageToken`: Boolean. When true, retrieves all items automatically across pages.
@@ -284,7 +283,7 @@ const GAApp = class GoogleApiApp {
   /**
    * ### Description
    * Extract target method details and construct the final endpoint.
-   * Path parameters are injected purely without URL encoding to support Google APIs composite names.
+   * Applies rigorous RFC 6570 encoding. `{+param}` allows reserved characters, `{param}` restricts them.
    *
    * @param {Function} callback Callback for logging.
    * @private
@@ -367,12 +366,17 @@ const GAApp = class GoogleApiApp {
 
     this.apiUrl = `${baseUrl}${out.path}`;
 
-    // Inject Path Parameters directly without URL encoding
+    // Inject Path Parameters with RFC 6570 compliant URL Encoding
     if (this.apiParams?.path) {
       Object.entries(this.apiParams.path).forEach(([k, v]) => {
-        // Strict RegExp matching `{param}` or `{+param}` to prevent aggressive substring collisions
+        const isReservedExpansion = this.apiUrl.includes(`{+${k}}`);
         const reg = new RegExp(`{\\+?${k}}`, "g");
-        this.apiUrl = this.apiUrl.replace(reg, v);
+
+        // encodeURI preserves reserved characters like '/', while encodeURIComponent escapes them.
+        const safeValue = isReservedExpansion
+          ? encodeURI(v)
+          : encodeURIComponent(v);
+        this.apiUrl = this.apiUrl.replace(reg, safeValue);
       });
     }
 
@@ -551,48 +555,21 @@ GAApp.discoveryCache = {};
 
 const globalAppInstance_ = new GAApp();
 
-/**
- * ### Description
- * Set information of Google API you want to use.
- *
- * @param {Object} object Configuration object.
- * @return {Object} Returns global `this` for chaining.
- */
 function setAPIInf(object = {}) {
   this.apiInf = object;
   return this;
 }
 
-/**
- * ### Description
- * Set parameters for using Google API.
- *
- * @param {Object} object Object including parameters.
- * @return {Object} Returns global `this` for chaining.
- */
 function setAPIParams(object = {}) {
   this.apiParams = object;
   return this;
 }
 
-/**
- * ### Description
- * Set access token.
- *
- * @param {String} accessToken
- * @return {Object} Returns global `this` for chaining.
- */
 function setAccessToken(accessToken) {
   this.accessToken = accessToken;
   return this;
 }
 
-/**
- * ### Description
- * Get information of Google API.
- *
- * @returns {String[]} Returned information of API.
- */
 function getAPI() {
   globalAppInstance_.setAPIInf(this.apiInf || {});
   globalAppInstance_.setAPIParams(this.apiParams || {});
@@ -600,13 +577,6 @@ function getAPI() {
   return globalAppInstance_.getAPI();
 }
 
-/**
- * ### Description
- * Request Google API.
- *
- * @param {Function} [callback=null] Optional callback function for logs.
- * @returns {UrlFetchApp.HTTPResponse|String[]}
- */
 function request(callback = null) {
   globalAppInstance_.setAPIInf(this.apiInf || {});
   globalAppInstance_.setAPIParams(this.apiParams || {});
@@ -614,12 +584,9 @@ function request(callback = null) {
   return globalAppInstance_.request(callback);
 }
 
-/**
- * ### Description
- * Retrieve the internal execution logs generated during the API requests.
- *
- * @returns {String[]} Array of timestamped log strings.
- */
 function getLogs() {
   return globalAppInstance_.getLogs();
 }
+
+// For directly using this
+// const GoogleApiApp = { setAPIInf, setAPIParams, request, getAPI, setAccessToken, getLogs };
